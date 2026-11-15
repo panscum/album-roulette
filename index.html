@@ -1,0 +1,425 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Album Roulette</title>
+<style>
+:root{--bg:#0f1012;--card:#1a1c20;--line:#2a2d33;--text:#eceef1;--dim:#9aa0a8;--acc:#1db954;--easy:#7aa7ff;--energy:#ffc24b;--intense:#ff5a4e;--unsorted:#9aa0a8}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:15px/1.45 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+header{position:sticky;top:0;z-index:5;background:rgba(15,16,18,.94);backdrop-filter:blur(8px);border-bottom:1px solid var(--line);padding:10px 14px;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+h1{font-size:17px;margin:0;flex:1;letter-spacing:.2px}
+nav{display:flex;gap:4px}
+nav button{background:none;border:1px solid transparent;color:var(--dim);padding:6px 10px;border-radius:999px;font:inherit;cursor:pointer}
+nav button.on{color:var(--text);border-color:var(--line);background:var(--card)}
+main{max-width:980px;margin:0 auto;padding:14px}
+#status{font-size:13px;color:var(--dim);min-height:18px;margin-bottom:8px}
+.intro{color:var(--dim);margin:2px 0 14px}
+.grid{display:grid;gap:14px;grid-template-columns:repeat(auto-fit,minmax(260px,1fr))}
+.card{background:var(--card);border:1px solid var(--line);border-radius:16px;overflow:hidden;display:flex;flex-direction:column}
+.card .mood{padding:10px 14px;font-weight:600;display:flex;justify-content:space-between;align-items:baseline;border-top:4px solid var(--m)}
+.card .mood small{font-weight:400;color:var(--dim)}
+.card img{width:100%;aspect-ratio:1;object-fit:cover;display:block;background:#222}
+.card .body{padding:12px 14px 14px;display:flex;flex-direction:column;gap:8px;flex:1}
+.card .title{font-weight:650;font-size:16px}
+.card .meta{color:var(--dim);font-size:13px}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;padding:9px 14px;border-radius:999px;border:1px solid var(--line);background:#24272c;color:var(--text);font:inherit;font-weight:600;cursor:pointer;text-decoration:none}
+.btn.primary{background:var(--acc);border-color:var(--acc);color:#04130a}
+.btn.small{padding:5px 10px;font-size:13px;font-weight:500}
+.chip{padding:3px 9px;border-radius:999px;border:1px solid var(--line);background:none;color:var(--dim);font:inherit;font-size:12px;cursor:pointer}
+.chip:hover{color:var(--text)}
+.played{color:var(--acc);font-size:13px;font-weight:600}
+.empty{padding:30px 14px;text-align:center;color:var(--dim)}
+.toolbar{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}
+input[type=text],input[type=search],select,textarea{background:#16181b;border:1px solid var(--line);color:var(--text);border-radius:10px;padding:8px 10px;font:inherit}
+input[type=search]{flex:1;min-width:160px}
+.lib{display:flex;flex-direction:column;gap:2px}
+.lib .item{display:flex;gap:10px;align-items:center;padding:6px;border-radius:10px}
+.lib .item:hover{background:var(--card)}
+.lib img{width:48px;height:48px;border-radius:6px;object-fit:cover;background:#222;flex:none}
+.lib .txt{flex:1;min-width:0}
+.lib .txt div{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.lib .txt .meta{color:var(--dim);font-size:12.5px}
+.dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:5px;vertical-align:middle}
+.panel{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px 16px;margin-bottom:14px}
+.panel h2{font-size:15px;margin:0 0 8px}
+.panel p,.panel li{color:var(--dim);font-size:14px}
+code{background:#101114;border:1px solid var(--line);padding:2px 6px;border-radius:6px;word-break:break-all;color:var(--text)}
+#toast{position:fixed;left:50%;bottom:18px;transform:translateX(-50%);background:#2b2f35;color:var(--text);padding:10px 16px;border-radius:12px;opacity:0;transition:opacity .25s;pointer-events:none;max-width:90vw;text-align:center}
+#toast.on{opacity:1}
+.stats{display:flex;gap:16px;flex-wrap:wrap;font-size:13px;color:var(--dim);margin-bottom:12px}
+.stats b{color:var(--text)}
+</style>
+</head>
+<body>
+<header>
+  <h1>🎲 Album Roulette</h1>
+  <nav>
+    <button data-view="pick">Today</button>
+    <button data-view="library">Library</button>
+    <button data-view="settings">Settings</button>
+  </nav>
+</header>
+<main>
+  <div id="status"></div>
+  <section id="view-pick" hidden></section>
+  <section id="view-library" hidden></section>
+  <section id="view-settings" hidden></section>
+</main>
+<div id="toast"></div>
+
+<script>
+/* ---------- config & storage ---------- */
+const SCOPES = 'user-library-read user-read-recently-played';
+const MOODS = {
+  easy:    {label:'Easy',      emoji:'🌙', hint:'good on the go',            color:'var(--easy)'},
+  energy:  {label:'Energetic', emoji:'⚡', hint:'something with a pulse',     color:'var(--energy)'},
+  intense: {label:'Intense',   emoji:'🔥', hint:'when you have the energy',   color:'var(--intense)'}
+};
+const SNOOZE_DAYS = 3;
+const redirectUri = location.origin + location.pathname;
+
+const store = {
+  get(k, d){ try{ const v = localStorage.getItem('ar_'+k); return v ? JSON.parse(v) : d; }catch{ return d; } },
+  set(k, v){ try{ localStorage.setItem('ar_'+k, JSON.stringify(v)); }catch(e){ console.warn('save failed', e); } },
+  del(k){ try{ localStorage.removeItem('ar_'+k); }catch{} }
+};
+let cfg     = store.get('cfg', {});        // {clientId, librarySyncedAt}
+let tok     = store.get('tok', null);      // {access, refresh, exp}
+let albums  = store.get('albums', []);     // cached saved albums
+let genres  = store.get('genres', {});     // artistId -> [genres]
+let user    = store.get('user', {});       // albumId -> {mood, plays:[ts], heard:ts, snooze:ts}
+let current = store.get('current', null);  // {day, picks:{easy:id,...}, played:{}}
+
+const $ = s => document.querySelector(s);
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const today = () => new Date().toLocaleDateString('en-CA');
+function toast(msg){ const t=$('#toast'); t.textContent=msg; t.classList.add('on'); clearTimeout(t._h); t._h=setTimeout(()=>t.classList.remove('on'), 3200); }
+function status(msg){ $('#status').textContent = msg || ''; }
+function ud(id){ return user[id] || (user[id] = {plays:[]}); }
+function saveUser(){ store.set('user', user); }
+
+/* ---------- Spotify auth (PKCE, no server needed) ---------- */
+function b64url(bytes){ return btoa(String.fromCharCode(...bytes)).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,''); }
+function randStr(n){ const a=new Uint8Array(n); crypto.getRandomValues(a); return b64url(a); }
+async function pkceChallenge(v){ const h = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(v)); return b64url(new Uint8Array(h)); }
+
+async function login(){
+  if(!cfg.clientId){ toast('Paste your Client ID first'); return; }
+  const verifier = randStr(64), state = randStr(16);
+  store.set('verifier', verifier); store.set('state', state);
+  const p = new URLSearchParams({
+    client_id: cfg.clientId, response_type:'code', redirect_uri: redirectUri,
+    code_challenge_method:'S256', code_challenge: await pkceChallenge(verifier),
+    scope: SCOPES, state
+  });
+  location.href = 'https://accounts.spotify.com/authorize?' + p;
+}
+async function handleCallback(){
+  const q = new URLSearchParams(location.search);
+  if(!q.has('code') && !q.has('error')) return;
+  history.replaceState(null, '', redirectUri);
+  if(q.get('error')) throw new Error('Spotify login was cancelled ('+q.get('error')+')');
+  if(q.get('state') !== store.get('state')) throw new Error('Login check failed — please try connecting again');
+  const r = await fetch('https://accounts.spotify.com/api/token', {
+    method:'POST', headers:{'Content-Type':'application/x-www-form-urlencoded'},
+    body: new URLSearchParams({grant_type:'authorization_code', code:q.get('code'), redirect_uri:redirectUri, client_id:cfg.clientId, code_verifier:store.get('verifier')})
+  });
+  const j = await r.json();
+  if(!r.ok) throw new Error('Spotify login failed: ' + (j.error_description || j.error));
+  saveTok(j); store.del('verifier'); store.del('state');
+}
+function saveTok(j){
+  tok = {access:j.access_token, refresh:j.refresh_token || tok?.refresh, exp:Date.now() + (j.expires_in - 60)*1000};
+  store.set('tok', tok);
+}
+async function refreshTok(){
+  if(!tok?.refresh) throw new Error('Please reconnect Spotify in Settings');
+  const r = await fetch('https://accounts.spotify.com/api/token', {
+    method:'POST', headers:{'Content-Type':'application/x-www-form-urlencoded'},
+    body: new URLSearchParams({grant_type:'refresh_token', refresh_token:tok.refresh, client_id:cfg.clientId})
+  });
+  const j = await r.json();
+  if(!r.ok){ tok=null; store.del('tok'); throw new Error('Spotify session expired — reconnect in Settings'); }
+  saveTok(j);
+}
+async function api(path){
+  if(!tok) throw new Error('Not connected to Spotify');
+  if(Date.now() > tok.exp) await refreshTok();
+  for(let i=0;i<6;i++){
+    const r = await fetch('https://api.spotify.com/v1' + path, {headers:{Authorization:'Bearer '+tok.access}});
+    if(r.status === 429){ await sleep((+(r.headers.get('Retry-After')) || 5) * 1000); continue; }
+    if(r.status === 401){ await refreshTok(); continue; }
+    if(r.status === 204) return null;
+    let j = null; try{ j = await r.json(); }catch{}
+    if(r.status === 403) throw new Error('Spotify refused access (403). In your Spotify app dashboard, add your account under User Management — and note dev apps need Premium.');
+    if(!r.ok) throw new Error('Spotify error: ' + (j?.error?.message || r.status));
+    return j;
+  }
+  throw new Error('Spotify is rate-limiting — try again in a bit');
+}
+
+/* ---------- syncing ---------- */
+async function syncLibrary(){
+  const out = []; let path = '/me/albums?limit=50';
+  while(path){
+    const j = await api(path);
+    for(const it of j.items){
+      const a = it.album;
+      out.push({
+        id:a.id, name:a.name, artist:a.artists.map(x=>x.name).join(', '), artistId:a.artists[0]?.id,
+        img:(a.images.find(i=>i.width && i.width<=320) || a.images[0])?.url || '',
+        url:a.external_urls?.spotify || ('https://open.spotify.com/album/'+a.id),
+        added:it.added_at, year:(a.release_date||'').slice(0,4), tracks:a.total_tracks
+      });
+    }
+    status(`Loading your saved albums… ${out.length} / ${j.total}`);
+    path = j.next ? j.next.replace('https://api.spotify.com/v1','') : null;
+  }
+  albums = out; store.set('albums', albums);
+  cfg.librarySyncedAt = Date.now(); store.set('cfg', cfg);
+}
+async function syncGenres(){
+  const ids = [...new Set(albums.map(a=>a.artistId).filter(id => id && !(id in genres)))];
+  let n = 0;
+  for(const id of ids){
+    try{ const j = await api('/artists/' + id); genres[id] = j?.genres || []; }
+    catch(e){ if(/403|connected|reconnect/.test(e.message)) throw e; genres[id] = []; }
+    n++;
+    if(n % 10 === 0 || n === ids.length){ store.set('genres', genres); status(`Guessing moods from genres… ${n} / ${ids.length} artists`); }
+    await sleep(120);
+  }
+}
+async function syncRecent(){
+  const j = await api('/me/player/recently-played?limit=50');
+  const have = new Set(albums.map(a=>a.id));
+  for(const it of j?.items || []){
+    const id = it.track?.album?.id; if(!have.has(id)) continue;
+    const t = Date.parse(it.played_at), u = ud(id);
+    if(!u.heard || t > u.heard) u.heard = t;
+  }
+  saveUser();
+}
+
+/* ---------- moods ---------- */
+const RX = {
+  intense: /(metal|hardcore|metalcore|deathcore|punk|grind|sludge|doom|thrash|djent|noise rock|industrial|screamo|stoner|mathcore|crust|powerviolence)/i,
+  easy:    /(ambient|lo-?fi|jazz|acoustic|folk|classical|soul|r&b|singer-songwriter|chill|piano|bossa|qawwali|sufi|ghazal|dream pop|shoegaze|soundtrack|new age|blues|bedroom|slowcore|downtempo|trip hop|instrumental|lounge|sleep)/i,
+  energy:  /(pop|dance|edm|house|techno|disco|funk|hip hop|rap|trap|electro|drum and bass|dubstep|reggaeton|rock|grunge|garage|afrobeat|bhangra|phonk|ska|j-rock|k-rock)/i
+};
+function autoMood(a){
+  const g = genres[a.artistId];
+  if(!g || !g.length) return null;
+  const s = g.join(' | ');
+  for(const m of ['intense','easy','energy']) if(RX[m].test(s)) return m;
+  return null;
+}
+function moodOf(a){ return user[a.id]?.mood || autoMood(a) || 'unsorted'; }
+
+/* ---------- weighting: less recently / less often heard = more likely ---------- */
+function lastListen(a){ const u = user[a.id] || {}; return Math.max(u.heard || 0, ...(u.plays || []), 0); }
+function weight(a){
+  const u = user[a.id] || {};
+  if(u.snooze && u.snooze > Date.now()) return 0;
+  const L = lastListen(a);
+  const days = L ? (Date.now() - L) / 864e5 : 400;          // never heard here = treated as ~400 days ago
+  const picks = (u.plays || []).length;
+  return Math.sqrt(Math.min(days, 400) + 0.5) / (1 + 0.15 * picks);
+}
+function weightedPick(pool, exclude){
+  const c = pool.filter(a => !exclude.has(a.id)).map(a => [a, weight(a)]).filter(x => x[1] > 0);
+  const total = c.reduce((s,x) => s + x[1], 0);
+  if(!total) return null;
+  let r = Math.random() * total;
+  for(const [a,w] of c){ r -= w; if(r <= 0) return a; }
+  return c[c.length-1][0];
+}
+function pickFor(mood, exclude){
+  const pool = albums.filter(a => moodOf(a) === mood);
+  return weightedPick(pool, exclude) || weightedPick(albums.filter(a => moodOf(a) === 'unsorted'), exclude);
+}
+function newPicks(){
+  const ex = new Set(), picks = {};
+  for(const m of Object.keys(MOODS)){ const a = pickFor(m, ex); if(a){ picks[m] = a.id; ex.add(a.id); } }
+  current = {day:today(), picks, played:{}}; store.set('current', current);
+}
+function reroll(mood){
+  const old = current.picks[mood];
+  if(old){ ud(old).snooze = Date.now() + SNOOZE_DAYS*864e5; saveUser(); }
+  const ex = new Set(Object.values(current.picks));
+  const a = pickFor(mood, ex);
+  if(a) current.picks[mood] = a.id; else delete current.picks[mood];
+  delete current.played[mood];
+  store.set('current', current); renderPick();
+}
+
+/* ---------- views ---------- */
+function ago(ts){
+  if(!ts) return 'not heard recently';
+  const d = (Date.now() - ts)/864e5;
+  if(d < 1) return 'heard today'; if(d < 2) return 'heard yesterday';
+  if(d < 14) return `heard ${Math.round(d)} days ago`;
+  if(d < 60) return `heard ${Math.round(d/7)} weeks ago`;
+  return `heard ${Math.round(d/30)} months ago`;
+}
+function renderPick(){
+  const el = $('#view-pick');
+  if(!albums.length){ el.innerHTML = `<div class="empty">No albums loaded yet. Connect Spotify in <b>Settings</b>.</div>`; return; }
+  if(!current || current.day !== today()) newPicks();
+  const byId = Object.fromEntries(albums.map(a=>[a.id,a]));
+  let html = `<p class="intro">Three albums for three moods. Ones you haven't played in a while are more likely to show up.</p><div class="grid">`;
+  for(const [m,info] of Object.entries(MOODS)){
+    const a = byId[current.picks[m]];
+    if(!a){ html += `<div class="card" style="--m:${info.color}"><div class="mood">${info.emoji} ${info.label}<small>${info.hint}</small></div><div class="empty">No ${info.label.toLowerCase()} albums yet.<br>Tag some in Library.</div></div>`; continue; }
+    const unsorted = moodOf(a) === 'unsorted';
+    html += `<div class="card" style="--m:${info.color}">
+      <div class="mood">${info.emoji} ${info.label}<small>${info.hint}</small></div>
+      ${a.img ? `<img src="${esc(a.img)}" alt="">` : ''}
+      <div class="body">
+        <div class="title">${esc(a.name)}</div>
+        <div class="meta">${esc(a.artist)}${a.year ? ' · '+a.year : ''} · ${ago(lastListen(a))}</div>
+        <div class="row">
+          <a class="btn primary" href="${esc(a.url)}" target="_blank" rel="noopener" data-play="${m}">▶ Play</a>
+          <button class="btn" data-reroll="${m}">Not today</button>
+        </div>
+        ${current.played[m] ? `<div class="played">✓ Enjoy!</div>` : ''}
+        <div class="row" style="margin-top:auto">
+          <span class="meta">${unsorted ? 'Mood unknown — which is it?' : 'Wrong mood?'}</span>
+          ${Object.entries(MOODS).filter(([k]) => unsorted || k !== m).map(([k,v]) => `<button class="chip" data-tag="${a.id}" data-mood="${k}">${v.emoji} ${v.label}</button>`).join('')}
+        </div>
+      </div></div>`;
+  }
+  html += `</div><div class="row" style="margin-top:16px;justify-content:center"><button class="btn" id="shuffleAll">🎲 New set of three</button></div>`;
+  el.innerHTML = html;
+}
+
+let libQuery = '', libMood = 'all';
+function renderLibrary(){
+  const el = $('#view-library');
+  const counts = {easy:0, energy:0, intense:0, unsorted:0};
+  albums.forEach(a => counts[moodOf(a)]++);
+  const list = albums
+    .filter(a => libMood === 'all' || moodOf(a) === libMood)
+    .filter(a => !libQuery || (a.name + ' ' + a.artist).toLowerCase().includes(libQuery.toLowerCase()))
+    .sort((a,b) => lastListen(a) - lastListen(b));
+  const colour = m => m === 'unsorted' ? 'var(--unsorted)' : MOODS[m].color;
+  el.innerHTML = `
+    <div class="stats"><span><b>${albums.length}</b> albums</span>
+      ${Object.entries(MOODS).map(([k,v]) => `<span><span class="dot" style="background:${v.color}"></span>${v.label} <b>${counts[k]}</b></span>`).join('')}
+      <span><span class="dot" style="background:var(--unsorted)"></span>Unsorted <b>${counts.unsorted}</b></span></div>
+    <div class="toolbar">
+      <input type="search" id="libQ" placeholder="Search albums or artists" value="${esc(libQuery)}">
+      <select id="libM">
+        <option value="all">All moods</option>
+        ${Object.entries(MOODS).map(([k,v]) => `<option value="${k}" ${libMood===k?'selected':''}>${v.emoji} ${v.label}</option>`).join('')}
+        <option value="unsorted" ${libMood==='unsorted'?'selected':''}>Unsorted</option>
+      </select>
+    </div>
+    <p class="intro" style="font-size:13px">Sorted by least recently heard. Set a mood to override the genre guess.</p>
+    <div class="lib">${list.map(a => {
+      const u = user[a.id] || {}, auto = autoMood(a);
+      return `<div class="item">
+        ${a.img ? `<img src="${esc(a.img)}" alt="" loading="lazy">` : '<img alt="">'}
+        <div class="txt"><div><span class="dot" style="background:${colour(moodOf(a))}"></span>${esc(a.name)}</div>
+          <div class="meta">${esc(a.artist)} · ${ago(lastListen(a))}${(u.plays||[]).length ? ' · picked '+u.plays.length+'×' : ''}</div></div>
+        <select data-setmood="${a.id}">
+          <option value="">Auto${auto ? ' ('+MOODS[auto].label+')' : ''}</option>
+          ${Object.entries(MOODS).map(([k,v]) => `<option value="${k}" ${u.mood===k?'selected':''}>${v.label}</option>`).join('')}
+        </select>
+      </div>`; }).join('') || '<div class="empty">Nothing here.</div>'}</div>`;
+  const q = $('#libQ'); q.oninput = () => { libQuery = q.value; const pos = q.selectionStart; renderLibrary(); const n = $('#libQ'); n.focus(); n.setSelectionRange(pos,pos); };
+  $('#libM').onchange = e => { libMood = e.target.value; renderLibrary(); };
+}
+
+function renderSettings(){
+  const el = $('#view-settings');
+  const connected = !!tok;
+  el.innerHTML = `
+    <div class="panel">
+      <h2>1 · Connect Spotify</h2>
+      <p>Create an app at <a href="https://developer.spotify.com/dashboard" target="_blank" rel="noopener" style="color:var(--acc)">developer.spotify.com/dashboard</a> (tick “Web API”), and add this exact Redirect URI:</p>
+      <p><code>${esc(redirectUri)}</code> <button class="btn small" id="copyUri">Copy</button></p>
+      <p>Then paste the app's Client ID here:</p>
+      <div class="row"><input type="text" id="cid" placeholder="Client ID" value="${esc(cfg.clientId||'')}" style="flex:1;min-width:220px">
+        <button class="btn primary" id="connect">${connected ? 'Reconnect' : 'Connect Spotify'}</button></div>
+      <p style="margin-top:10px">${connected ? '✅ Connected.' : 'Not connected yet.'} Spotify requires the app owner to have Premium for developer apps.</p>
+    </div>
+    <div class="panel">
+      <h2>2 · Library</h2>
+      <p>${albums.length} saved albums cached${cfg.librarySyncedAt ? ', last synced ' + new Date(cfg.librarySyncedAt).toLocaleString() : ''}. New saves are picked up once a day automatically.</p>
+      <div class="row"><button class="btn" id="resync" ${connected?'':'disabled'}>Resync now</button>
+        <button class="btn" id="regenre" ${connected?'':'disabled'}>Re-guess moods</button></div>
+    </div>
+    <div class="panel">
+      <h2>3 · Backup</h2>
+      <p>Your mood tags and listening history live in this browser only. Export a backup now and then, and import it on another device.</p>
+      <div class="row"><button class="btn" id="export">Export backup</button>
+        <label class="btn">Import backup<input type="file" id="import" accept=".json,application/json" hidden></label>
+        <button class="btn" id="logout">Disconnect</button></div>
+    </div>`;
+  $('#copyUri').onclick = async () => { try{ await navigator.clipboard.writeText(redirectUri); toast('Copied'); }catch{ toast('Copy failed — select it manually'); } };
+  $('#connect').onclick = () => { cfg.clientId = $('#cid').value.trim(); store.set('cfg', cfg); login(); };
+  $('#resync').onclick = () => fullSync(true);
+  $('#regenre').onclick = async () => { genres = {}; store.set('genres', genres); await runTask(syncGenres); current = null; toast('Moods re-guessed'); };
+  $('#export').onclick = () => {
+    const blob = new Blob([JSON.stringify({version:1, user, exported:new Date().toISOString()}, null, 1)], {type:'application/json'});
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'album-roulette-backup-' + today() + '.json'; a.click();
+  };
+  $('#import').onchange = async e => {
+    try{ const j = JSON.parse(await e.target.files[0].text()); if(!j.user) throw 0; user = j.user; saveUser(); current = null; toast('Backup imported'); show('pick'); }
+    catch{ toast('That file is not a valid backup'); }
+  };
+  $('#logout').onclick = () => { tok = null; store.del('tok'); toast('Disconnected'); renderSettings(); };
+}
+
+let view = 'pick';
+function show(v){
+  view = v;
+  for(const s of ['pick','library','settings']) $('#view-'+s).hidden = s !== v;
+  document.querySelectorAll('nav button').forEach(b => b.classList.toggle('on', b.dataset.view === v));
+  ({pick:renderPick, library:renderLibrary, settings:renderSettings})[v]();
+}
+
+/* ---------- events ---------- */
+document.querySelector('nav').onclick = e => { const v = e.target.closest('button')?.dataset.view; if(v) show(v); };
+document.addEventListener('click', e => {
+  const play = e.target.closest('[data-play]');
+  if(play){ const m = play.dataset.play, id = current.picks[m]; ud(id).plays.push(Date.now()); delete ud(id).snooze; saveUser(); current.played[m] = true; store.set('current', current); setTimeout(renderPick, 50); return; }
+  const rr = e.target.closest('[data-reroll]'); if(rr){ reroll(rr.dataset.reroll); return; }
+  const tag = e.target.closest('[data-tag]');
+  if(tag){ ud(tag.dataset.tag).mood = tag.dataset.mood; saveUser(); toast('Moved to ' + MOODS[tag.dataset.mood].label);
+    const slot = Object.keys(current.picks).find(k => current.picks[k] === tag.dataset.tag);
+    if(slot && slot !== tag.dataset.mood){ const ex = new Set(Object.values(current.picks)); const a = pickFor(slot, ex); if(a) current.picks[slot] = a.id; else delete current.picks[slot]; store.set('current', current); }
+    renderPick(); return; }
+  if(e.target.id === 'shuffleAll'){ newPicks(); renderPick(); }
+});
+document.addEventListener('change', e => {
+  const s = e.target.closest('[data-setmood]');
+  if(s){ const u = ud(s.dataset.setmood); if(s.value) u.mood = s.value; else delete u.mood; saveUser(); renderLibrary(); }
+});
+
+/* ---------- startup ---------- */
+async function runTask(fn){
+  try{ await fn(); status(''); }
+  catch(e){ status(''); toast(e.message); console.error(e); }
+  show(view);
+}
+async function fullSync(force){
+  await runTask(async () => {
+    if(force || !albums.length || Date.now() - (cfg.librarySyncedAt||0) > 864e5) await syncLibrary();
+    status('Checking what you played recently…'); await syncRecent().catch(()=>{});
+    await syncGenres();
+  });
+}
+(async function init(){
+  try{ await handleCallback(); }catch(e){ toast(e.message); }
+  if(!cfg.clientId || !tok){ show('settings'); return; }
+  show('pick');
+  await fullSync(false);
+})();
+</script>
+</body>
+</html>
